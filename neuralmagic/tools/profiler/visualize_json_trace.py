@@ -52,24 +52,14 @@ if __name__ == "__main__":
                         type=str,
                         default="module",
                         choices=["module", "kernel"])
-    parser.add_argument("--top_k",
-                        type=int,
-                        default=9,
-                        help="Only graph the top `top_k` entries by time.")
-    parser.add_argument("--ignore_sampler",
-                        action='store_true',
-                        help="Ignore everything under the \"Sampler\" module")
 
     args = parser.parse_args()
 
-    ignore_sampler = args.ignore_sampler
-    make_names_unique = False
-    top_k = args.top_k
-
+    ignore_sampler = False
     if args.level == "module":
         depth = -2
-        make_names_unique = True
     elif args.level == "kernel":
+        ignore_sampler = True
         depth = -1
     else:
         raise Exception(f"Unexpected level value ({args.level})")
@@ -153,24 +143,14 @@ if __name__ == "__main__":
                 entry["name"] = " <- ".join((entry["name"], ) +
                                             trace[:first_trace_difference + 1])
 
-    if make_names_unique:
-        attempt_to_make_names_unique(prefill_entries_and_traces)
-        attempt_to_make_names_unique(decode_entries_and_traces)
-
-    def keep_only_top_entries(df, metric, top_k=9):
-        df.loc[df.nsmallest(len(df) - top_k + 1, metric).index,
-               ["name"]] = "others"
+    attempt_to_make_names_unique(prefill_entries_and_traces)
+    attempt_to_make_names_unique(decode_entries_and_traces)
 
     prefill_df = pd.DataFrame(
         [entry for entry, _ in prefill_entries_and_traces])
     prefill_df["phase"] = "prefill"
     decode_df = pd.DataFrame([entry for entry, _ in decode_entries_and_traces])
     decode_df["phase"] = "decode"
-
-    if top_k:
-        keep_only_top_entries(prefill_df, "cuda_time_us", top_k)
-        keep_only_top_entries(decode_df, "cuda_time_us", top_k)
-
     df = pd.concat([prefill_df, decode_df])
     df["cuda_time_ms"] = df["cuda_time_us"] / 1000
 

@@ -29,7 +29,7 @@ class ProfileContext:
 
 
 def run_profile(context: ProfileContext, csv_output: Optional[str],
-                json_output: Optional[str]):
+                json_output: Optional[str], hta_trace_output: Optional[str]):
     print("Run profile with:")
     for key, value in asdict(context).items():
         print(f"  {key} = {value}")
@@ -82,10 +82,17 @@ def run_profile(context: ProfileContext, csv_output: Optional[str],
                 size=(prompt_len, )).tolist(),
             sampling_params=sampling_params)
 
-    with nm_profile() as prefill_prof:
+    if hta_trace_output:
+        hta_trace_output_decode = hta_trace_output + "/decode"
+        hta_trace_output_prefill = hta_trace_output + "/prefill"
+    else:
+        hta_trace_output_decode = None
+        hta_trace_output_prefill = None
+
+    with nm_profile(hta_trace=hta_trace_output_prefill) as prefill_prof:
         llm.llm_engine.step()  # First step is prefill
 
-    with nm_profile() as decode_prof:
+    with nm_profile(hta_trace=hta_trace_output_decode) as decode_prof:
         llm.llm_engine.step()
 
     prefill_results = prefill_prof.results
@@ -176,6 +183,10 @@ if __name__ == "__main__":
         type=str,
         default=None,
         help="Export the results as a json file. This should be the filename")
+    parser.add_argument("--hta-trace",
+                        type=str,
+                        default=None,
+                        help="Export hta trace results")
     parser.add_argument(
         "--sparsity",
         "-s",
@@ -238,4 +249,7 @@ if __name__ == "__main__":
             for k, v in vars(args).items()
             if k in inspect.signature(ProfileContext).parameters
         })
-    run_profile(context, csv_output=args.csv, json_output=args.json)
+    run_profile(context,
+                csv_output=args.csv,
+                json_output=args.json,
+                hta_trace_output=args.hta_trace)

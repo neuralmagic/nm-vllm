@@ -7,7 +7,7 @@ from vllm.profiler.utils import (indent_string, TablePrinter, event_has_module,
                                  event_is_torch_op, event_module_repr,
                                  event_torch_op_stack_trace)
 from typing import Dict, List, Union, Optional, Tuple, Callable, TypeAlias
-from torch.profiler import profile, ProfilerActivity
+from torch.profiler import profile, ProfilerActivity, tensorboard_trace_handler
 from torch.autograd.profiler import FunctionEvent
 from torch._C._autograd import _ProfilerResult, _KinetoEvent, DeviceType
 from torch._C._profiler import _EventType, _ProfilerEvent, _ExperimentalConfig
@@ -330,9 +330,15 @@ class NMProfileResults(profile):
 
 class nm_profile(profile):
 
-    def __init__(self):
+    def __init__(self, hta_trace=Optional[str]):
+        trace_handler = None
+        if hta_trace:
+            trace_handler = tensorboard_trace_handler(dir_name=hta_trace,
+                                                      use_gzip=True)
+
         super().__init__(
             activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+            on_trace_ready=trace_handler,
             record_shapes=True,
             with_stack=True,
             with_modules=True,
