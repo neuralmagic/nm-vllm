@@ -74,10 +74,7 @@ class EncoderAttention(EncDecAttention):
         key = key.view(batch_size, seq_len, self.num_heads, self.head_size)
         value = value.view(batch_size, seq_len, self.num_heads, self.head_size)
         if input_metadata.attn_bias is None:
-            input_metadata.attn_bias = BlockDiagonalCausalMask.from_seqlens(
-                [seq_len] * batch_size)
-
-        input_metadata.attn_bias = input_metadata.attn_bias[:, :, :, :seq_len]
+            pass 
 
         # Normal attention
         out = xops.memory_efficient_attention_forward(
@@ -137,7 +134,6 @@ class DecoderAttention(EncDecAttention):
         # vectors will not be cached. This happens during the initial memory
         # profiling run.
         if key_cache is not None and value_cache is not None:
-
             cache_ops.reshape_and_cache(
                 key, value, key_cache, value_cache,
                 input_metadata.slot_mapping[:, -1].flatten().contiguous(),
@@ -159,7 +155,7 @@ class DecoderAttention(EncDecAttention):
             num_kv_heads=self.num_heads,
             scale=self.scale,
             alibi_slopes=None,
-            custom_bias=input_metadata.attn_bias.to(torch.float32),
+            custom_bias=input_metadata.attn_bias.to(torch.float32) if input_metadata.attn_bias is not None else None,
             kv_cache_dtype=input_metadata.kv_cache_dtype,
         )
         return output.view(batch_size, seq_len, hidden_size)

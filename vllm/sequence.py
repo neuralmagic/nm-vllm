@@ -150,12 +150,12 @@ class Sequence:
         self.logical_token_blocks: List[LogicalTokenBlock] = []
         initial_token_ids = prompt_token_ids
         if is_decoder_encoder:
+            from vllm.config import AudioFeaturesConfig
             # We need to separate the prompt and generated tokens for encoder-decoder models.
-            num_prompt_blocks = (len(prompt_token_ids) + block_size -
+            num_prompt_blocks = (AudioFeaturesConfig().sequence_length + block_size -
                                  1) // block_size
             padded_prompt_len = num_prompt_blocks * block_size
-            initial_token_ids = prompt_token_ids + [0] * (
-                padded_prompt_len - len(prompt_token_ids))
+            initial_token_ids = [0] * padded_prompt_len
             # Also need to append decoder_start_token_id
             initial_token_ids.append(0)
 
@@ -269,6 +269,25 @@ class SequenceGroupState:
     generator: Optional = None
 
 
+class MultiModalData:
+    """Multi modal request.
+    
+    Args:
+        type: The data type.
+        data: The actual data.
+        The required shape and semantic meaning of it depends on the vision
+        language config of the hosted model. 
+        See `VisionLanguageConfig` in `config.py`.
+    """
+
+    class Type(enum.Enum):
+        FEATURES = enum.auto()
+
+    def __init__(self, type: Type, data: "torch.Tensor"):
+        self.type = type
+        self.data = data
+
+
 class SequenceGroup:
     """A group of sequences that are generated from the same prompt.
 
@@ -289,6 +308,7 @@ class SequenceGroup:
         arrival_time: float,
         lora_request: Optional[LoRARequest] = None,
         prefix: Optional[Prefix] = None,
+        multi_modal_data: Optional[MultiModalData] = None,
     ) -> None:
         self.request_id = request_id
         self.seqs_dict = {seq.seq_id: seq for seq in seqs}
@@ -300,6 +320,7 @@ class SequenceGroup:
                                       time_in_queue=None)
         self.lora_request = lora_request
         self.prefix: Optional[Prefix] = prefix
+        self.multi_modal_data: Optional[MultiModalData] = multi_modal_data
         self.prompt_logprobs: Optional[PromptLogprobs] = None
         self.state = SequenceGroupState()
 
@@ -432,6 +453,7 @@ class SequenceGroupMetadata:
         sampling_params: SamplingParams,
         block_tables: Dict[int, List[int]],
         lora_request: Optional[LoRARequest] = None,
+        multi_modal_data: Optional[MultiModalData] = None,
         prefix: Optional[Prefix] = None,
         state: Optional[SequenceGroupState] = None,
     ) -> None:
@@ -441,7 +463,9 @@ class SequenceGroupMetadata:
         self.sampling_params = sampling_params
         self.block_tables = block_tables
         self.lora_request = lora_request
+        self.multi_modal_data = multi_modal_data
         self.prefix = prefix
+        self.multi_modal_data = multi_modal_data
         self.state = SequenceGroupState() if state is None else state
 
     @property
