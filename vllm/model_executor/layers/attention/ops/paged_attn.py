@@ -37,13 +37,13 @@ class PagedAttentionImpl:
 
     @staticmethod
     def forward_decode(
-        query: torch.Tensor,
-        key_cache: torch.Tensor,
-        value_cache: torch.Tensor,
-        input_metadata: InputMetadata,
-        num_kv_heads: int,
-        scale: float,
-        alibi_slopes: Optional[torch.Tensor],
+            query: torch.Tensor,
+            key_cache: torch.Tensor,
+            value_cache: torch.Tensor,
+            input_metadata: InputMetadata,
+            num_kv_heads: int,
+            scale: float,
+            alibi_slopes: Optional[torch.Tensor],
     ) -> torch.Tensor:
         output = torch.empty_like(query)
 
@@ -52,6 +52,17 @@ class PagedAttentionImpl:
         max_num_partitions = (
             (input_metadata.max_context_len + _PARTITION_SIZE - 1) //
             _PARTITION_SIZE)
+
+        attn_bias = input_metadata.attn_bias
+        if attn_bias is not None:
+            if attn_bias == 'not_causal':
+                attn_bias = None
+            elif isinstance(attn_bias,List):
+                # Attention bias may be provided as list
+                attn_bias = attn_bias[0].to(torch.float32)
+            else:
+                attn_bias = attn_bias.to(torch.float32)
+
         # NOTE(woosuk): We use a simple heuristic to decide whether to use
         # PagedAttention V1 or V2. If the number of partitions is 1, we use
         # V1 to avoid the overhead of reduction. Also, if the number of
@@ -75,6 +86,7 @@ class PagedAttentionImpl:
                 block_size,
                 input_metadata.max_context_len,
                 alibi_slopes,
+                attn_bias,
                 input_metadata.kv_cache_dtype,
             )
         else:
@@ -106,6 +118,7 @@ class PagedAttentionImpl:
                 block_size,
                 input_metadata.max_context_len,
                 alibi_slopes,
+                attn_bias,
                 input_metadata.kv_cache_dtype,
             )
         return output

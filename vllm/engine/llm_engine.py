@@ -99,6 +99,9 @@ class LLMEngine:
         self._init_tokenizer()
         self.seq_counter = Counter()
 
+        self.is_encoder_decoder = getattr(self.model_config.hf_config,
+                                          "is_encoder_decoder", False)
+
         self.model_executor = executor_class(model_config, cache_config,
                                              parallel_config, scheduler_config,
                                              device_config, lora_config)
@@ -252,6 +255,9 @@ class LLMEngine:
             >>> # continue the request processing
             >>> ...
         """
+        decoder_prompt = None
+        decoder_prompt_token_ids = None
+
         if lora_request is not None and not self.lora_config:
             raise ValueError(f"Got lora_request {lora_request} but LoRA is "
                              "not enabled!")
@@ -270,13 +276,41 @@ class LLMEngine:
             prompt_token_ids=prompt_token_ids,
             lora_request=lora_request)
 
+
         # Create the sequences.
         block_size = self.cache_config.block_size
         seq_id = next(self.seq_counter)
         eos_token_id = self.tokenizer.get_lora_tokenizer(
             lora_request).eos_token_id
-        seq = Sequence(seq_id, prompt, prompt_token_ids, block_size,
-                       eos_token_id, lora_request)
+        seq = None
+        cross_seqs: Dict[str, Sequence] = {}
+
+        if self.is_encoder_decoder:
+            if decoder_prompt is None:
+                decoder_prompt = ""
+                decoder_prompt_token_ids = [0,]
+            else:
+                decoder_prompt_token_ids = self.encode_request(
+                    request_id=request_id,
+                    prompt=decoder_prompt,
+                    prompt_token_ids=decoder_prompt_token_ids,
+                    lora_request=lora_request)
+
+            # Encoder/decoder
+            # Decoder input is decoder_prompt
+            # Encoder input (cross sequence) is prompt
+            seq = Sequence(seq_id, decoder_prompt, decoder_prompt_token_ids, block_size,
+                            eos_token_id, lora_request)
+            cross_seq_id = next(self.seq_counter)
+            cross_seqs["encoder"] = Sequence(cross_seq_id, prompt, prompt_token_ids, block_size,
+                                          eos_token_id, lora_request)
+        else:
+            assert decoder_prompt is None, f"Decoder-only model requires decoder_prompt is None, but decoder_prompt={decoder_prompt}"
+
+            # Decoder only; input prompt is necessarily decoder input
+            # No decoder prompt
+            seq = Sequence(seq_id, prompt, prompt_token_ids, block_size,
+                           eos_token_id, lora_request)
 
         # Defensive copy of SamplingParams, which are used by the sampler,
         # this doesn't deep-copy LogitsProcessor objects
@@ -284,7 +318,7 @@ class LLMEngine:
 
         # Create the sequence group.
         seq_group = SequenceGroup(request_id, [seq], sampling_params,
-                                  arrival_time, lora_request)
+                                  arrival_time, lora_request, cross_seqs=None if len(cross_seqs)==0 else cross_seqs)
 
         # Add the sequence group to the scheduler.
         self.scheduler.add_seq_group(seq_group)

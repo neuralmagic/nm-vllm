@@ -172,8 +172,10 @@ class Sequence:
         self.output_text = ""
 
         self.logical_token_blocks: List[LogicalTokenBlock] = []
+
         # Initialize the logical token blocks with the prompt token ids.
         self._append_tokens_to_blocks(prompt_token_ids)
+
         self.status = SequenceStatus.WAITING
 
         # Used for incremental detokenization
@@ -313,9 +315,11 @@ class SequenceGroup:
         sampling_params: SamplingParams,
         arrival_time: float,
         lora_request: Optional[LoRARequest] = None,
+        cross_seqs: Dict[str, Sequence] = None,
     ) -> None:
         self.request_id = request_id
         self.seqs_dict = {seq.seq_id: seq for seq in seqs}
+        self.cross_seqs = {} if cross_seqs is None else cross_seqs
         self.sampling_params = sampling_params
         self.metrics = RequestMetrics(arrival_time=arrival_time,
                                       last_token_time=arrival_time,
@@ -451,6 +455,8 @@ class SequenceGroupMetadata:
         seq_data: Dict[int, SequenceData],
         sampling_params: SamplingParams,
         block_tables: Dict[int, List[int]],
+        cross_seq_data: Dict[str, SequenceData] = None,
+        cross_block_tables: Dict[str, List[int]] = None,
         lora_request: Optional[LoRARequest] = None,
         computed_block_nums: Optional[List[int]] = None,
         state: Optional[SequenceGroupState] = None,
@@ -460,6 +466,8 @@ class SequenceGroupMetadata:
         self.seq_data = seq_data
         self.sampling_params = sampling_params
         self.block_tables = block_tables
+        self.cross_seq_data = {} if cross_seq_data is None else cross_seq_data
+        self.cross_block_tables = {} if cross_block_tables is None else cross_block_tables
         self.lora_request = lora_request
         self.computed_block_nums = computed_block_nums
         self.state = SequenceGroupState() if state is None else state
