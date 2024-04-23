@@ -76,6 +76,9 @@ class InputMetadata:
     # Cuda-graph is currently enabled for decoding only.
     use_cuda_graph: bool
     kv_cache_dtype: str
+    # Optional metadata which allows InputMetadata to support
+    # encoder self-attention and decoder cross-attention
+    cross_input_metadata: Optional[List[Dict]] = None
 
     def __post_init__(self):
         # Set during the execution of the first attention op.
@@ -89,6 +92,20 @@ class InputMetadata:
         if self.use_cuda_graph:
             assert self.num_prompt_tokens == 0
 
+    def __repr__(self) -> str:
+        return ("InputMetadata("
+                f"is_prompt={self.is_prompt}, "
+                f"slot_mapping={self.slot_mapping}, "
+                f"prompt_lens={self.prompt_lens}, "
+                f"max_seq_len={self.max_seq_len}, "
+                f"seq_start_loc={self.seq_start_loc}, "
+                f"max_context_len={self.max_context_len}, "
+                f"context_lens={self.context_lens}, "
+                f"block_tables={self.block_tables}, "
+                f"use_cuda_graph={self.use_cuda_graph}, "
+                f"kv_cache_dtype={self.kv_cache_dtype}, "
+                f"cross_input_metadata={self.cross_input_metadata})")
+    
     def asdict_zerocopy(self) -> Dict[str, Any]:
         """Similar to dataclasses.asdict, but avoids deepcopying."""
         # Note that if we add dataclasses as fields, they will need

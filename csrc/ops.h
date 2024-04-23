@@ -14,6 +14,7 @@ void paged_attention_v1(
   int block_size,
   int max_context_len,
   const c10::optional<torch::Tensor>& alibi_slopes,
+  const c10::optional<torch::Tensor>& custom_bias,
   const std::string& kv_cache_dtype);
 
 void paged_attention_v2(
@@ -31,6 +32,7 @@ void paged_attention_v2(
   int block_size,
   int max_context_len,
   const c10::optional<torch::Tensor>& alibi_slopes,
+  const c10::optional<torch::Tensor>& custom_bias,
   const std::string& kv_cache_dtype);
 
 void rms_norm(
