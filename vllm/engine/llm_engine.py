@@ -526,6 +526,7 @@ class LLMEngine:
         for scheduled_seq_group in scheduled_seq_groups:
             seq_group = scheduled_seq_group.seq_group
             seq_group.maybe_set_first_token_time(now)
+            seq_group.maybe_set_num_generated_tokens()
             request_output = RequestOutput.from_seq_group(seq_group)
             request_outputs.append(request_output)
         for seq_group in ignored_seq_groups:
@@ -659,9 +660,12 @@ class LLMEngine:
         # Request stats
         #   Latency
         time_e2e_requests: List[float] = []
+        time_inference_requests: List[float] = []
+        time_queue_requests: List[float] = []
         #   Metadata
         num_prompt_tokens_requests: List[int] = []
         num_generation_tokens_requests: List[int] = []
+        max_num_generation_tokens_requests: List[int] = []
         best_of_requests: List[int] = []
         n_requests: List[int] = []
         finished_reason_requests: List[str] = []
@@ -711,6 +715,19 @@ class LLMEngine:
                     # Latency timings
                     time_e2e_requests.append(now -
                                              seq_group.metrics.arrival_time)
+                    time_queue_requests.append(
+                        seq_group.metrics.first_scheduled_time -
+                        seq_group.metrics.arrival_time)
+                    time_inference_requests.append(
+                        now - seq_group.metrics.first_scheduled_time)
+
+                    # Input and output length metadata.
+                    num_prompt_tokens_requests.append(
+                        seq_group.metrics.num_prompt_tokens)
+                    num_generation_tokens_requests.append(
+                        seq_group.metrics.num_generated_tokens)
+                    max_num_generation_tokens_requests.append(
+                        seq_group.metrics.max_num_generated_tokens)
 
                     # Metadata
                     num_prompt_tokens_requests.append(
@@ -766,9 +783,13 @@ class LLMEngine:
             # Request stats
             #   Latency
             time_e2e_requests=time_e2e_requests,
+            time_inference_requests=time_inference_requests,
+            time_queue_requests=time_queue_requests,
             #   Metadata
             num_prompt_tokens_requests=num_prompt_tokens_requests,
             num_generation_tokens_requests=num_generation_tokens_requests,
+            max_num_generation_tokens_requests=
+            max_num_generation_tokens_requests,
             best_of_requests=best_of_requests,
             n_requests=n_requests,
             finished_reason_requests=finished_reason_requests,
