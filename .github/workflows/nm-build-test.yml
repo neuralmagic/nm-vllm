@@ -91,7 +91,7 @@ on:
 
 jobs:
 
-    JSON-VALIDATE:
+    Val-Json:
         runs-on: gcp-k8s-util
         strategy:
             matrix:
@@ -103,8 +103,8 @@ jobs:
                 echo "label: ${{ matrix.test_config.label }}"
                 echo "tests: ${{ matrix.test_config.test }}"
 
-    BUILD:
-        needs: [JSON-VALIDATE]
+    Bu:
+        needs: [Val-Json]
         uses: ./.github/workflows/nm-build.yml
         with:
             wf_category: ${{ inputs.wf_category }}
@@ -116,69 +116,206 @@ jobs:
             python: ${{ inputs.python }}
         secrets: inherit
 
-    TEST:
-        needs: [BUILD]
-        if: success()
+    Te:
+        needs: [Bu]
         strategy:
             fail-fast: false
             matrix:
-                test_config: ${{ fromJson(inputs.test_configs) }}
-        uses: ./.github/workflows/nm-test.yml
-        with:
-            test_label: ${{ matrix.test_config.label }}
-            timeout: ${{ inputs.test_timeout }}
-            gitref: ${{ github.ref }}
-            python: ${{ matrix.test_config.python }}
-            whl: ${{ needs.BUILD.outputs.whl }}
-            test_skip_env_vars: ${{ matrix.test_config.test }}
-        secrets: inherit
+                job-partition: ${{ fromJson(needs.Bu.outputs.job-partitions) }}
+                test-config: ${{ fromJson(inputs.test_configs ) }}
 
-    BENCHMARK:
-        needs: [BUILD]
-        if: success()
-        uses: ./.github/workflows/nm-benchmark.yml
-        with:
-            label: ${{ inputs.benchmark_label }}
-            benchmark_config_list_file: ${{ inputs.benchmark_config_list_file }}
-            timeout: ${{ inputs.benchmark_timeout }}
-            gitref: ${{ github.ref }}
-            python: ${{ inputs.python }}
-            whl: ${{ needs.BUILD.outputs.whl }}
-            # Always push if it is a scheduled job
-            push_benchmark_results_to_gh_pages: "${{ github.event_name == 'schedule' || inputs.push_benchmark_results_to_gh_pages }}"
-        secrets: inherit
+        runs-on: gcp-k8s-util
+        timeout-minutes: ${{ fromJson(inputs.test_timeout) }}
 
-    LM-EVAL:
-      needs: [BUILD]
-      uses: ./.github/workflows/nm-lm-eval.yml
-      with:
-        label: ${{ inputs.lm_eval_label }}
-        timeout: ${{ inputs.lm_eval_timeout }}
-        gitref: ${{ inputs.gitref }}
-        python: ${{ inputs.python }}
-        whl: ${{ needs.BUILD.outputs.whl }}
-        lm_eval_configuration: ${{ inputs.lm_eval_configuration }}
-      secrets: inherit
+        steps:
 
-    # uploading is only available when using GCP autoscaling group
-    UPLOAD:
-        needs: [TEST, BENCHMARK, LM-EVAL]
-        if: ${{ inputs.push_to_pypi }}
-        uses: ./.github/workflows/nm-upload-assets-to-gcp.yml
-        with:
-            label: gcp-k8s-util
-            timeout: ${{ inputs.build_timeout }}
-            gitref: ${{ github.ref }}
-        secrets: inherit
+            - name: set python
+              id: set_python
+              uses: actions/setup-python@v5
+              with:
+                python-version: ${{ inputs.python }}
 
-    # update docker
-    DOCKER:
-        needs: [BUILD, UPLOAD]
-        if: ${{ inputs.push_to_pypi }}
-        uses: ./.github/workflows/publish-docker.yml
-        with:
-            push_to_repository: ${{ inputs.push_to_pypi }}
-            gitref: ${{ inputs.gitref }}
-            wf_category: ${{ inputs.wf_category }}
-            wheel: ${{ needs.BUILD.outputs.whl }}
-        secrets: inherit
+            - name: install automation components
+              uses: neuralmagic/nm-actions/actions/install-automation-components@install-prereqs
+
+            - name: checkout
+              id: checkout
+              uses: actions/checkout@v4
+              with:
+                fetch-depth: 0
+                ref: ${{ inputs.gitref }}
+                submodules: recursive
+
+            - name: setenv
+              id: setenv
+              uses: ./.github/actions/nm-set-env/
+              with:
+                hf_token: ${{ secrets.NM_HF_TOKEN }}
+                Gi_per_thread: 1
+                nvcc_threads: 0
+
+            - name: install testmo
+              uses: neuralmagic/nm-actions/actions/install-testmo@main
+
+            # - name: create testmo run
+            #   id: create_testmo_run
+            #   uses: ./.github/actions/nm-testmo-run-create/
+            #   if: success() || failure()
+            #   with:
+            #     testmo_url: https://neuralmagic.testmo.net
+            #     testmo_token: ${{ secrets.TESTMO_TEST_TOKEN }}
+            #     source: 'build-test'
+
+            - name: verify python
+              id: verify_python
+              uses: ./.github/actions/nm-verify-python/
+
+            # - name: caches
+            #   id: caches
+            #   uses: ./.github/actions/nm-caches/
+
+            - name: download whl
+              id: download
+              uses: actions/download-artifact@v4
+              with:
+                name: ${{ needs.Bu.outputs.whl }}
+                path: ${{ needs.Bu.outputs.whl }}
+
+            - name: install whl
+              uses: ./.github/actions/nm-install-whl/
+              with:
+                python: ${{ inputs.python }}
+                venv:
+
+            - name: run buildkite script
+              run: |
+                cd tests && sudo bash ../.buildkite/download-images.sh
+
+            - name: setenv test skip
+              id: setenv_test_skip
+              uses: ./.github/actions/nm-set-env-test-skip
+              with:
+                test_skip_env_vars: ${{ matrix.test-config.test }}
+
+            - name: take a look
+              run: |
+                echo "partition: ${{ matrix.job-partition }}"
+
+    #         - name: run tests
+    #           id: test
+    #           uses: ./.github/actions/nm-test-whl/
+    #           with:
+    #             test_directory: tests
+    #             test_results: test-results
+
+    #         - name: upload code coverage html
+    #           uses: actions/upload-artifact@v4
+    #           if: success() || failure()
+    #           with:
+    #             name: cc-vllm-html-${{ inputs.test_label }}-${{ inputs.python }}
+    #             path: cc-vllm-html
+    #             retention-days: 15
+
+    #         - name: report test results
+    #           id: report_test
+    #           uses: ./.github/actions/nm-testmo-run-submit-thread/
+    #           if: success() || failure()
+    #           with:
+    #             testmo_url: https://neuralmagic.testmo.net
+    #             testmo_token: ${{ secrets.TESTMO_TEST_TOKEN }}
+    #             testmo_run_id: ${{ steps.create_testmo_run.outputs.id }}
+    #             results: test-results
+    #             step_status: ${{ steps.test.outputs.status }}
+
+    #         - name: summary
+    #           uses: ./.github/actions/nm-summary-test/
+    #           if: success() || failure()
+    #           with:
+    #             test_label: ${{ inputs.test_label }}
+    #             gitref: ${{ inputs.gitref }}
+    #             testmo_run_url: https://neuralmagic.testmo.net/automation/runs/view/${{ steps.create_testmo_run.outputs.id }}
+    #             python: ${{ steps.verify_python.outputs.version }}
+    #             whl: ${{ steps.test.outputs.whl }}
+    #             magic_wand: ${{ steps.test.outputs.magic_wand }}
+    #             test_status: ${{ steps.test.outputs.status }}
+
+    #         - name: complete testmo run
+    #           uses: ./.github/actions/nm-testmo-run-complete/
+    #           if: success() || failure()
+    #           with:
+    #             testmo_url: https://neuralmagic.testmo.net
+    #             testmo_token: ${{ secrets.TESTMO_TEST_TOKEN }}
+    #             testmo_run_id: ${{ steps.create_testmo_run.outputs.id }}
+
+            # - name: take a look
+            #   run: |
+            #     echo "label: ${{ matrix.test-config.label }}"
+            #     echo "python: ${{ matrix.test-config.python }}"
+            #     echo "tests: ${{ matrix.job-partition }}"
+
+    # TODO: re-enable after proof of concept is green
+    # TEST:
+    #     needs: [BUILD]
+    #     strategy:
+    #         fail-fast: false
+    #         matrix:
+    #             test_config: ${{ fromJson(inputs.test_configs) }}
+    #     uses: ./.github/workflows/nm-test.yml
+    #     with:
+    #         test_label: ${{ matrix.test_config.label }}
+    #         timeout: ${{ inputs.test_timeout }}
+    #         gitref: ${{ github.ref }}
+    #         python: ${{ matrix.test_config.python }}
+    #         whl: ${{ needs.BUILD.outputs.whl }}
+    #         test_skip_env_vars: ${{ matrix.test_config.test }}
+    #     secrets: inherit
+
+    # BENCHMARK:
+    #     needs: [BUILD]
+    #     if: success()
+    #     uses: ./.github/workflows/nm-benchmark.yml
+    #     with:
+    #         label: ${{ inputs.benchmark_label }}
+    #         benchmark_config_list_file: ${{ inputs.benchmark_config_list_file }}
+    #         timeout: ${{ inputs.benchmark_timeout }}
+    #         gitref: ${{ github.ref }}
+    #         python: ${{ inputs.python }}
+    #         whl: ${{ needs.BUILD.outputs.whl }}
+    #         # Always push if it is a scheduled job
+    #         push_benchmark_results_to_gh_pages: "${{ github.event_name == 'schedule' || inputs.push_benchmark_results_to_gh_pages }}"
+    #     secrets: inherit
+
+    # LM-EVAL:
+    #   needs: [BUILD]
+    #   uses: ./.github/workflows/nm-lm-eval.yml
+    #   with:
+    #     label: ${{ inputs.lm_eval_label }}
+    #     timeout: ${{ inputs.lm_eval_timeout }}
+    #     gitref: ${{ inputs.gitref }}
+    #     python: ${{ inputs.python }}
+    #     whl: ${{ needs.BUILD.outputs.whl }}
+    #     lm_eval_configuration: ${{ inputs.lm_eval_configuration }}
+    #   secrets: inherit
+
+    # # uploading is only available when using GCP autoscaling group
+    # UPLOAD:
+    #     needs: [TEST, BENCHMARK, LM-EVAL]
+    #     if: ${{ inputs.push_to_pypi }}
+    #     uses: ./.github/workflows/nm-upload-assets-to-gcp.yml
+    #     with:
+    #         label: gcp-k8s-util
+    #         timeout: ${{ inputs.build_timeout }}
+    #         gitref: ${{ github.ref }}
+    #     secrets: inherit
+
+    # # update docker
+    # DOCKER:
+    #     needs: [BUILD, UPLOAD]
+    #     if: ${{ inputs.push_to_pypi }}
+    #     uses: ./.github/workflows/publish-docker.yml
+    #     with:
+    #         push_to_repository: ${{ inputs.push_to_pypi }}
+    #         gitref: ${{ inputs.gitref }}
+    #         wf_category: ${{ inputs.wf_category }}
+    #         wheel: ${{ needs.BUILD.outputs.whl }}
+    #     secrets: inherit

@@ -31,6 +31,13 @@ on:
         description: "python version, e.g. 3.10.12"
         type: string
         required: true
+    outputs:
+      job-partitions:
+        description: "stringified Json of test partitions"
+        value: ${{ jobs.Bu.outputs.job-partitions }}
+      whl:
+        description: "generated whl file"
+        value: ${{ jobs.Bu.outputs.whl }}
 
   # makes workflow manually callable
   workflow_dispatch:
@@ -69,7 +76,7 @@ env:
 
 jobs:
 
-    BUILD:
+    Bu:
 
         runs-on: ${{ inputs.build_label }}
         timeout-minutes: ${{ fromJson(inputs.timeout) }}
@@ -79,19 +86,29 @@ jobs:
             id-token: 'write'
 
         outputs:
+            job-partitions: ${{ steps.job-partitions.outputs.partitions }}
             run_id: ${{ github.run_id }}
             whl: ${{ steps.build.outputs.whl }}
-            tarfile: ${{ steps.build.outputs.tarfile }}
 
         steps:
 
             - name: checkout
               id: checkout
-              uses: actions/checkout@v4
+              uses: actions/checkout@v4.1.7
               with:
                 fetch-depth: 0
                 ref: ${{ inputs.gitref }}
                 submodules: recursive
+
+            - name: create job partitions
+              id: job-partitions
+              run: |
+                sudo apt install -y jq
+                TESTS_DEPTH_1=$(find tests -type f -maxdepth 1 -mindepth 1 -iname "test*.py")
+                TEST_DIRS=$(find tests -type d -maxdepth 1 -mindepth 1)
+                TEST_DIRS_ARRAY=(${TEST_DIRS})
+                JOBS=$(printf '%s\n' "${TEST_DIRS_ARRAY[@]}" | jq -R . | jq -s . | tr -d "[:space:]")
+                echo "partitions=${JOBS}" >> $GITHUB_OUTPUT
 
             - name: setenv
               id: setenv
@@ -125,26 +142,24 @@ jobs:
                 python: ${{ inputs.python }}
                 venv: ${{ env.VENV_BASE }}
 
-            # GCP
-            - name: 'Authenticate to Google Cloud'
-              id: auth
-              uses: google-github-actions/auth@v2.1.3
-              with:
-                  project_id: ${{ secrets.GCP_PROJECT }}
-                  workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-                  service_account: ${{ secrets.NM_PYPI_SA }}
+            # # GCP
+            # - name: 'Authenticate to Google Cloud'
+            #   id: auth
+            #   uses: google-github-actions/auth@v2.1.3
+            #   with:
+            #       project_id: ${{ secrets.GCP_PROJECT }}
+            #       workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+            #       service_account: ${{ secrets.NM_PYPI_SA }}
 
-            - name: 'Set up Cloud SDK'
-              uses: 'google-github-actions/setup-gcloud@v2'
-              with:
-                  version: '>= 473.0.0'
+            # - name: 'Set up Cloud SDK'
+            #   uses: 'google-github-actions/setup-gcloud@v2'
+            #   with:
+            #       version: '>= 473.0.0'
 
-            - name: copy whl and source distribution
-              run: |
-                # echo "whl: ${{ steps.build.outputs.whl }}"
-                # echo "tarfile: ${{ steps.build.outputs.tarfile }}"
-                gcloud storage cp dist/${{ steps.build.outputs.whl }} gs://neuralmagic-public-pypi/assets/${{ github.run_id }}/${{ steps.build.outputs.whl }}
-                gcloud storage cp dist/${{ steps.build.outputs.tarfile }} gs://neuralmagic-public-pypi/assets/${{ github.run_id }}/${{ steps.build.outputs.tarfile }}
+            # - name: copy whl and source distribution
+            #   run: |
+            #     gcloud storage cp dist/${{ steps.build.outputs.whl }} gs://neuralmagic-public-pypi/assets/${{ github.run_id }}/${{ steps.build.outputs.whl }}
+            #     gcloud storage cp dist/${{ steps.build.outputs.tarfile }} gs://neuralmagic-public-pypi/assets/${{ github.run_id }}/${{ steps.build.outputs.tarfile }}
 
             - name: upload whl
               uses: actions/upload-artifact@v4
